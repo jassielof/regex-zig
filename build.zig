@@ -4,11 +4,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const pcre2_dep = b.dependency("pcre2", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const pcre2_headers = b.addWriteFiles();
+    _ = pcre2_headers.addCopyFile(pcre2_dep.path("src/pcre2.h.generic"), "pcre2.h");
+
     const pcre2_mod = b.addModule("pcre2", .{
         .root_source_file = b.path("src/lib/pcre2.zig"),
         .target = target,
         .optimize = optimize,
     });
+    pcre2_mod.addIncludePath(pcre2_headers.getDirectory());
+    pcre2_mod.linkLibrary(pcre2_dep.artifact("pcre2-8"));
 
     const re2_mod = b.addModule("re2", .{
         .root_source_file = b.path("src/lib/re2.zig"),
