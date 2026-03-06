@@ -34,8 +34,6 @@ jobs:
       - name: Build docs
         run: zig build --summary all docs
 
-      - run: cp docs/index.html zig-out/docs/index.html
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
