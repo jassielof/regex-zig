@@ -1,0 +1,6 @@
+[submodule "modules/pcre2"]
+	path = modules/pcre2
+	url = https://github.com/PCRE2Project/pcre2
+[submodule "modules/re2"]
+	path = modules/re2
+	url = https://github.com/google/re2
