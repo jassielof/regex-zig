@@ -20,11 +20,34 @@ pub fn build(b: *std.Build) void {
     pcre2_mod.addIncludePath(pcre2_headers.getDirectory());
     pcre2_mod.linkLibrary(pcre2_dep.artifact("pcre2-8"));
 
+    const re2_dep = b.dependency("re2", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Build RE2 from modules/re2 with CMake (RE2's CMakeLists requires Abseil).
+    const re2_configure = b.addSystemCommand(&.{ "cmake" });
+    re2_configure.setCwd(b.path("."));
+    re2_configure.addArg("-S");
+    re2_configure.addArg("modules/re2");
+    re2_configure.addArg("-B");
+    re2_configure.addArg("re2-build");
+    re2_configure.addArg("-DCMAKE_BUILD_TYPE=Release");
+    re2_configure.addArg("-DBUILD_SHARED_LIBS=OFF");
+    re2_configure.addArg("-DRE2_BUILD_TESTING=OFF");
+    re2_configure.addArg("-DRE2_TEST=OFF");
+    re2_configure.addArg("-DRE2_INSTALL=OFF");
+
+    const re2_build = b.addSystemCommand(&.{ "cmake", "--build", "re2-build" });
+    re2_build.setCwd(b.path("."));
+    re2_build.step.dependOn(&re2_configure.step);
+
     const re2_mod = b.addModule("re2", .{
         .root_source_file = b.path("src/lib/re2.zig"),
         .target = target,
         .optimize = optimize,
     });
+    re2_mod.addIncludePath(b.path("src/re2_ffi"));
 
     const docs_lib = b.addLibrary(.{
         .name = "regex",
@@ -61,6 +84,16 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    tests.addCSourceFile(.{
+        .file = b.path("src/re2_ffi/re2_ffi.cpp"),
+        .flags = &.{ "-std=c++17" },
+    });
+    tests.linkLibCpp();
+    tests.step.dependOn(&re2_build.step);
+    tests.addLibraryPath(b.path("re2-build/re2"));
+    tests.addLibraryPath(b.path("re2-build/re2/Release"));
+    tests.addIncludePath(re2_dep.path("."));
+    tests.linkSystemLibrary("re2");
 
     const tests_step = b.step("tests", "Run the test suite");
     const run_tests = b.addRunArtifact(tests);
