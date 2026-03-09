@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
         });
 
         // Build RE2 from modules/re2 with CMake (RE2's CMakeLists requires Abseil).
-        const re2_configure = b.addSystemCommand(&.{ "cmake" });
+        const re2_configure = b.addSystemCommand(&.{"cmake"});
         re2_configure.setCwd(b.path("."));
         re2_configure.addArg("-S");
         re2_configure.addArg("modules/re2");
@@ -96,7 +96,7 @@ pub fn build(b: *std.Build) void {
     if (re2_build_step) |step| {
         tests.addCSourceFile(.{
             .file = b.path("src/re2_ffi/re2_ffi.cpp"),
-            .flags = &.{ "-std=c++17" },
+            .flags = &.{"-std=c++17"},
         });
         tests.linkLibCpp();
         tests.step.dependOn(step);
