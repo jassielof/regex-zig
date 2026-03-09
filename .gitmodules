@@ -4,6 +4,3 @@
 [submodule "modules/re2"]
 	path = modules/re2
 	url = https://github.com/google/re2
-[submodule "modules/cre2"]
-	path = modules/cre2
-	url = https://github.com/marcomaggi/cre2.git
