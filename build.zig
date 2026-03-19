@@ -1,4 +1,5 @@
 const std = @import("std");
+const abseil_build = @import("abseil.build.zig");
 
 const abseil_base_sources = .{
     "log_severity.cc",
@@ -286,8 +287,6 @@ pub fn build(b: *std.Build) void {
     abseil_lib.addCSourceFiles(.{ .root = abseil_dep.path("absl/profiling"), .files = &abseil_profiling_sources, .flags = flags });
     abseil_lib.addCSourceFiles(.{ .root = abseil_dep.path("absl/random"), .files = &abseil_random_sources, .flags = flags });
 
-    // --- RE2 ---
-
     const re2_dep = b.dependency("re2", .{
         .target = target,
         .optimize = optimize,
@@ -301,13 +300,16 @@ pub fn build(b: *std.Build) void {
             .link_libcpp = true,
         }),
     });
+
     re2_lib.addIncludePath(re2_dep.path("."));
     re2_lib.addIncludePath(abseil_dep.path("."));
+
     re2_lib.addCSourceFiles(.{
         .root = re2_dep.path("."),
         .files = &re2_sources,
         .flags = flags,
     });
+
     re2_lib.linkLibrary(abseil_lib);
 
     const re2_mod = b.addModule("re2", .{
@@ -315,9 +317,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
     re2_mod.addIncludePath(b.path("src/re2_ffi"));
 
-    // --- Docs ---
+    const docs_step = b.step("docs", "Generate the documentation");
 
     const docs_lib = b.addLibrary(.{
         .name = "regex",
@@ -334,37 +337,46 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "docs",
     });
 
-    const docs_step = b.step("docs", "Generate the documentation");
     docs_step.dependOn(&docs.step);
 
-    // --- Tests ---
+    const tests_step = b.step("tests", "Run the test suite");
 
-    const tests_root = b.createModule(.{
+    const integration_tests_mod = b.createModule(.{
         .root_source_file = b.path("tests/suite.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "pcre2",
+                .module = pcre2_mod,
+            },
+            .{
+                .name = "re2",
+                .module = re2_mod,
+            },
+        },
     });
-    tests_root.addImport("pcre2", pcre2_mod);
-    tests_root.addImport("re2", re2_mod);
 
-    const tests = b.addTest(.{
-        .root_module = tests_root,
+    const integration_tests = b.addTest(.{
+        .root_module = integration_tests_mod,
     });
-    tests.addCSourceFile(.{
+
+    integration_tests.root_module.addCSourceFile(.{
         .file = b.path("src/re2_ffi/re2_ffi.cpp"),
         .flags = &.{"-std=c++17"},
     });
-    tests.linkLibCpp();
-    tests.addIncludePath(b.path("src/re2_ffi"));
-    tests.addIncludePath(re2_dep.path("."));
-    tests.addIncludePath(abseil_dep.path("."));
-    tests.linkLibrary(re2_lib);
+
+    integration_tests.root_module.link_libcpp = true;
+    integration_tests.root_module.addIncludePath(b.path("src/re2_ffi"));
+    integration_tests.root_module.addIncludePath(re2_dep.path("."));
+    integration_tests.root_module.addIncludePath(abseil_dep.path("."));
+    integration_tests.root_module.linkLibrary(re2_lib);
+
     if (target.result.os.tag == .windows) {
-        tests.linkSystemLibrary("dbghelp");
-        tests.linkSystemLibrary("bcrypt");
+        integration_tests.root_module.linkSystemLibrary("dbghelp", .{});
+        integration_tests.root_module.linkSystemLibrary("bcrypt", .{});
     }
 
-    const tests_step = b.step("tests", "Run the test suite");
-    const run_tests = b.addRunArtifact(tests);
+    const run_tests = b.addRunArtifact(integration_tests);
     tests_step.dependOn(&run_tests.step);
 }
