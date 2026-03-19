@@ -56,12 +56,18 @@ pub fn build(b: *std.Build) void {
     const abseil_lib = abseil_build.build(b, target, optimize);
     const re2_lib = re2_build.build(b, target, optimize, abseil_lib);
 
+    const re2_options = b.addOptions();
+    // Mirrors CMake `RE2_USE_ICU` when wired to ICU; C++ build unchanged until then.
+    const re2_icu = b.option(bool, "re2-icu", "Reserved: full Unicode via ICU (RE2_USE_ICU); not implemented") orelse false;
+    re2_options.addOption(bool, "icu_unicode_properties", re2_icu);
+
     const re2_mod = b.addModule("re2", .{
         .root_source_file = b.path("src/lib/re2.zig"),
         .target = target,
         .optimize = optimize,
     });
 
+    re2_mod.addOptions("re2_options", re2_options);
     re2_mod.addIncludePath(b.path("src/re2_ffi"));
     re2_mod.linkLibrary(re2_lib);
 

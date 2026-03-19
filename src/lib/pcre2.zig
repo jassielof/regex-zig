@@ -3,16 +3,22 @@
 //! **Code unit width** is selected at build time via `-Dpcre2-width=8|16|32`
 //! (default: `8`).  All string arguments use `[]const Char` — which is `u8`
 //! for the default 8-bit build, `u16` for 16-bit, and `u32` for 32-bit.
+//! Run integration tests with each width in CI (separate `zig build test` invocations).
 //!
 //! **JIT** is enabled at build time via `-Dpcre2-jit=true` (default: `true`).
-//! When enabled, `Pattern.compile` automatically calls `pcre2_jit_compile`
-//! right after the pattern is compiled, and `matchInternal` routes through
-//! `pcre2_jit_match` instead of `pcre2_match` for every successful JIT
-//! pattern.  The `jit_enabled` constant and the `Pattern.jit` field let
-//! callers inspect this at runtime.
+//! When enabled, `Pattern.compile` calls `pcre2_jit_compile` after compile **unless**
+//! `MatchLimits` are set — JIT matching does not honor
+//! match/depth/heap limits, so JIT is skipped when any limit is configured.
 //!
-//! Zero-copy where possible; an allocator is only required for `replace` and
-//! `findAll`.
+//! **Catastrophic backtracking mitigation:** PCRE2 provides *match limit* (how many
+//! times the match engine may iterate), *depth limit* (parentheses/recursion depth),
+//! and *heap limit* (bytes of heap used during match). Set these via
+//! `CompileOptions.limits`. When exceeded, `match`,
+//! `search`, `findAll`, and `replace` return `MatchError.MatchLimitExceeded`,
+//! `MatchError.DepthLimitExceeded`, or `MatchError.HeapLimitExceeded` respectively
+//! (see `pcre2_match(3)`).
+//!
+//! Zero-copy where possible; an allocator is only required for `replace` and `findAll`.
 const std = @import("std");
 
 const pcre2_options = @import("pcre2_options");
@@ -32,33 +38,20 @@ const pcre2c = @cImport({
 /// Suffix string matching the configured code unit width: `"8"`, `"16"`, or `"32"`.
 const width_suffix = @tagName(pcre2_options.code_unit_width);
 
-/// Returns the PCRE2 C type whose name is `base ++ "_" ++ width_suffix`.
-/// Example: `pcre2Type("pcre2_code")` → `pcre2c.pcre2_code_8` for width 8.
+/// Code unit width selected at build time (`-Dpcre2-width=…`).
+pub const configured_code_unit_width = pcre2_options.code_unit_width;
+
 fn pcre2Type(comptime base: []const u8) type {
     return @field(pcre2c, base ++ "_" ++ width_suffix);
 }
 
 /// The character element type for the configured code unit width.
-///
-/// | `-Dpcre2-width` | `Char` |
-/// |-----------------|--------|
-/// | `8` (default)   | `u8`   |
-/// | `16`            | `u16`  |
-/// | `32`            | `u32`  |
-///
-/// All public functions that accept or return strings use `[]const Char` (or
-/// `[]Char` for owned buffers), so the API is type-correct across all widths.
 pub const Char = switch (pcre2_options.code_unit_width) {
     .@"8" => u8,
     .@"16" => u16,
     .@"32" => u32,
 };
 
-/// `true` when the library was compiled with JIT support (`-Dpcre2-jit=true`).
-///
-/// When `true`, `Pattern.compile` calls `pcre2_jit_compile` automatically and
-/// the `Pattern.jit` field will be `true` if JIT compilation succeeded.
-/// Matches then use the faster `pcre2_jit_match` path.
 pub const jit_enabled = pcre2_options.support_jit;
 
 // ----------------------------------------------------------------------------
@@ -66,6 +59,7 @@ pub const jit_enabled = pcre2_options.support_jit;
 
 const Pcre2Code = pcre2Type("pcre2_code");
 const Pcre2MatchData = pcre2Type("pcre2_match_data");
+const Pcre2MatchContext = pcre2Type("pcre2_match_context");
 
 // ----------------------------------------------------------------------------
 // Width-aware C function references
@@ -81,14 +75,21 @@ const pcre2_get_ovector_pointer_fn = @field(pcre2c, "pcre2_get_ovector_pointer_"
 const pcre2_get_ovector_count_fn = @field(pcre2c, "pcre2_get_ovector_count_" ++ width_suffix);
 const pcre2_substitute_fn = @field(pcre2c, "pcre2_substitute_" ++ width_suffix);
 const pcre2_get_error_message_fn = @field(pcre2c, "pcre2_get_error_message_" ++ width_suffix);
+const pcre2_match_context_create_fn = @field(pcre2c, "pcre2_match_context_create_" ++ width_suffix);
+const pcre2_match_context_free_fn = @field(pcre2c, "pcre2_match_context_free_" ++ width_suffix);
+const pcre2_set_match_limit_fn = @field(pcre2c, "pcre2_set_match_limit_" ++ width_suffix);
+const pcre2_set_depth_limit_fn = @field(pcre2c, "pcre2_set_depth_limit_" ++ width_suffix);
+const pcre2_set_heap_limit_fn = @field(pcre2c, "pcre2_set_heap_limit_" ++ width_suffix);
 
 // ----------------------------------------------------------------------------
 // C constants
 
-// ~(PCRE2_SIZE)0 is not translatable by cImport; approximate with maxInt(usize)
 const PCRE2_UNSET_val = std.math.maxInt(usize);
 const PCRE2_ERROR_NOMATCH = pcre2c.PCRE2_ERROR_NOMATCH;
 const PCRE2_ERROR_NOMEMORY = pcre2c.PCRE2_ERROR_NOMEMORY;
+const PCRE2_ERROR_MATCHLIMIT = pcre2c.PCRE2_ERROR_MATCHLIMIT;
+const PCRE2_ERROR_DEPTHLIMIT = pcre2c.PCRE2_ERROR_DEPTHLIMIT;
+const PCRE2_ERROR_HEAPLIMIT = pcre2c.PCRE2_ERROR_HEAPLIMIT;
 const PCRE2_SUBSTITUTE_GLOBAL = pcre2c.PCRE2_SUBSTITUTE_GLOBAL;
 const PCRE2_CASELESS = pcre2c.PCRE2_CASELESS;
 const PCRE2_MULTILINE = pcre2c.PCRE2_MULTILINE;
@@ -98,7 +99,21 @@ const PCRE2_LITERAL = pcre2c.PCRE2_LITERAL;
 const PCRE2_JIT_COMPLETE = pcre2c.PCRE2_JIT_COMPLETE;
 
 // ----------------------------------------------------------------------------
-// Compile options (Zig-friendly)
+/// Limits applied during matching to mitigate catastrophic backtracking / runaway recursion.
+///
+/// Maps to `pcre2_set_match_limit`, `pcre2_set_depth_limit`, and `pcre2_set_heap_limit`.
+/// Use `null` for a field to leave that limit at the library default (from `config.h`).
+///
+/// When any limit is set, JIT compilation is **disabled** for that pattern so limits are enforced.
+pub const MatchLimits = struct {
+    match_limit: ?u32 = null,
+    depth_limit: ?u32 = null,
+    heap_limit: ?u32 = null,
+
+    fn active(self: MatchLimits) bool {
+        return self.match_limit != null or self.depth_limit != null or self.heap_limit != null;
+    }
+};
 
 pub const CompileOptions = struct {
     caseless: bool = false,
@@ -106,6 +121,8 @@ pub const CompileOptions = struct {
     dotall: bool = false,
     utf: bool = true,
     literal: bool = false,
+    /// Optional match / depth / heap limits (see [`MatchLimits`]).
+    limits: ?MatchLimits = null,
 
     fn toPcre2Flags(opts: CompileOptions) u32 {
         var f: u32 = 0;
@@ -118,23 +135,24 @@ pub const CompileOptions = struct {
     }
 };
 
-// ----------------------------------------------------------------------------
-// Compile error
-
 pub const CompileError = error{
     InvalidPattern,
     PatternTooLarge,
     NestLimit,
     HeapFailed,
-    /// Use `getErrorMessage` for details; the offset into the pattern is not
-    /// currently surfaced through this API.
     Other,
 };
 
-/// Returns a human-readable message for a PCRE2 error code into `buffer`.
-///
-/// `buffer` must be a slice of `Char` (u8/u16/u32 depending on the configured
-/// code unit width).  Returns the sub-slice that was written.
+/// Returned when matching hits a configured limit or an unexpected engine error.
+pub const MatchError = error{
+    MatchLimitExceeded,
+    DepthLimitExceeded,
+    HeapLimitExceeded,
+    MatchEngineFailed,
+    /// `pcre2_substitute` returned an error other than a limit or resize.
+    SubstituteFailed,
+};
+
 pub fn getErrorMessage(code: c_int, buffer: []Char) []const Char {
     if (buffer.len == 0) return buffer[0..0];
     const n = pcre2_get_error_message_fn(code, buffer.ptr, buffer.len);
@@ -143,32 +161,28 @@ pub fn getErrorMessage(code: c_int, buffer: []Char) []const Char {
 }
 
 // ----------------------------------------------------------------------------
-// Pattern (owns compiled code + cached match_data)
-
 pub const Pattern = struct {
     code: *Pcre2Code,
     match_data: ?*Pcre2MatchData,
-    /// `true` when JIT compilation succeeded for this pattern.
-    ///
-    /// Requires `jit_enabled == true` at build time.  When `true`, `matchInternal`
-    /// routes through `pcre2_jit_match` instead of `pcre2_match`.
+    /// Non-null when [`CompileOptions.limits`] was set with at least one field.
+    match_context: ?*Pcre2MatchContext,
     jit: bool,
 
     const Self = @This();
 
-    /// Release compiled code and any cached match_data.
     pub fn deinit(self: *Self) void {
         if (self.match_data) |md| {
             pcre2_match_data_free_fn(md);
             self.match_data = null;
         }
+        if (self.match_context) |mc| {
+            pcre2_match_context_free_fn(mc);
+            self.match_context = null;
+        }
         pcre2_code_free_fn(self.code);
         self.* = undefined;
     }
 
-    /// Compile `pattern`.  When `jit_enabled`, also JIT-compiles the result
-    /// for faster matching; if JIT compilation fails (e.g. unsupported CPU),
-    /// the interpreter path is used silently.
     pub fn compile(pattern: []const Char, options: CompileOptions) CompileError!Self {
         var err_num: c_int = 0;
         var err_off: pcre2c.PCRE2_SIZE = 0;
@@ -191,9 +205,26 @@ pub const Pattern = struct {
 
         const md = pcre2_match_data_create_fn(code, null);
 
-        // Attempt JIT compilation; a non-zero return means JIT is unavailable
-        // (not compiled in, or unsupported architecture) — fall back silently.
-        const jit: bool = if (jit_enabled)
+        var mctx: ?*Pcre2MatchContext = null;
+        const limits_on = if (options.limits) |l| l.active() else false;
+        if (limits_on) {
+            const ctx = pcre2_match_context_create_fn(null) orelse return CompileError.HeapFailed;
+            mctx = ctx;
+            const lim = options.limits.?;
+            if (lim.match_limit) |n| {
+                _ = pcre2_set_match_limit_fn(ctx, n);
+            }
+            if (lim.depth_limit) |n| {
+                _ = pcre2_set_depth_limit_fn(ctx, n);
+            }
+            if (lim.heap_limit) |n| {
+                _ = pcre2_set_heap_limit_fn(ctx, n);
+            }
+        }
+
+        // JIT does not enforce match/depth/heap limits; skip JIT when limits are active.
+        const try_jit = jit_enabled and !limits_on;
+        const jit: bool = if (try_jit)
             pcre2_jit_compile_fn(code.?, PCRE2_JIT_COMPLETE) == 0
         else
             false;
@@ -201,11 +232,11 @@ pub const Pattern = struct {
         return .{
             .code = code.?,
             .match_data = md,
+            .match_context = mctx,
             .jit = jit,
         };
     }
 
-    /// Compile a literal string (no regex metacharacters interpreted).
     pub fn compileLiteral(pattern: []const Char) CompileError!Self {
         return compile(pattern, .{ .literal = true });
     }
@@ -223,28 +254,26 @@ test "Pattern.compileLiteral" {
     try std.testing.expect(pat.code != undefined);
 }
 
-test "Pattern.jit reflects jit_enabled" {
+test "Pattern.jit reflects jit_enabled when no limits" {
     var pat = try Pattern.compile("\\d+", .{});
     defer pat.deinit();
-    // When JIT is built in, every successfully compiled pattern should be JIT'd.
     try std.testing.expect(pat.jit == jit_enabled);
 }
 
-// ----------------------------------------------------------------------------
-// Match (zero-copy view into the subject)
+test "Pattern.jit disabled when limits set" {
+    var pat = try Pattern.compile("\\d+", .{ .limits = .{ .match_limit = 1000 } });
+    defer pat.deinit();
+    try std.testing.expect(!pat.jit);
+}
 
+// ----------------------------------------------------------------------------
 const MAX_GROUPS = 32;
 
 pub const Match = struct {
-    /// Subject string all slices below index into.
     subject: []const Char,
-    /// [0] = full match offsets; [1..] = capture group offsets.
-    /// An unset group has both offsets equal to `std.math.maxInt(usize)`.
     pairs: [MAX_GROUPS][2]usize,
-    /// Number of pairs populated (1 + number of capture groups).
     n: u32,
 
-    /// Full match slice.
     pub fn full(self: *const Match) []const Char {
         if (self.n == 0) return self.subject[0..0];
         const s = self.pairs[0][0];
@@ -253,8 +282,6 @@ pub const Match = struct {
         return self.subject[s..e];
     }
 
-    /// Capture group by index (0 = full match, 1 = first group, …).
-    /// Returns an empty slice for unset or out-of-range groups.
     pub fn group(self: *const Match, index: u32) []const Char {
         if (index >= self.n) return self.subject[0..0];
         const s = self.pairs[index][0];
@@ -263,7 +290,6 @@ pub const Match = struct {
         return self.subject[s..e];
     }
 
-    /// Number of capture groups (excluding the full-match entry at index 0).
     pub fn groupCount(self: *const Match) u32 {
         if (self.n <= 1) return 0;
         return self.n - 1;
@@ -274,16 +300,19 @@ fn matchInternal(
     subject: []const Char,
     pat: *const Pattern,
     start_offset: usize,
-) ?Match {
+) MatchError!?Match {
     const md = pat.match_data orelse return null;
-
-    // Use the JIT path when available — it bypasses sanity checks for speed.
+    const mctx = pat.match_context;
     const rc: c_int = if (pat.jit)
-        pcre2_jit_match_fn(pat.code, subject.ptr, subject.len, start_offset, 0, md, null)
+        pcre2_jit_match_fn(pat.code, subject.ptr, subject.len, start_offset, 0, md, mctx)
     else
-        pcre2_match_fn(pat.code, subject.ptr, subject.len, start_offset, 0, md, null);
+        pcre2_match_fn(pat.code, subject.ptr, subject.len, start_offset, 0, md, mctx);
 
-    if (rc == PCRE2_ERROR_NOMATCH or rc < 0) return null;
+    if (rc == PCRE2_ERROR_NOMATCH) return null;
+    if (rc == PCRE2_ERROR_MATCHLIMIT) return error.MatchLimitExceeded;
+    if (rc == PCRE2_ERROR_DEPTHLIMIT) return error.DepthLimitExceeded;
+    if (rc == PCRE2_ERROR_HEAPLIMIT) return error.HeapLimitExceeded;
+    if (rc < 0) return error.MatchEngineFailed;
 
     const ovec = pcre2_get_ovector_pointer_fn(md);
     const n = pcre2_get_ovector_count_fn(md);
@@ -307,58 +336,69 @@ fn matchInternal(
     return m;
 }
 
-/// Match `pat` in `subject` starting at `start_offset`.
-/// Returns `null` when there is no match.
-pub fn match(subject: []const Char, pat: *const Pattern, start_offset: usize) ?Match {
+/// No match → `null`. Limit or engine failure → `MatchError`.
+pub fn match(subject: []const Char, pat: *const Pattern, start_offset: usize) MatchError!?Match {
     return matchInternal(subject, pat, start_offset);
 }
 
 test match {
     var pat = try Pattern.compile("(hello)|(world)", .{});
     defer pat.deinit();
-    const m = match("hello world", &pat, 0);
+    const m = try match("hello world", &pat, 0);
     try std.testing.expect(m != null);
     try std.testing.expectEqualStrings(m.?.full(), "hello");
     try std.testing.expectEqualStrings(m.?.group(1), "hello");
 }
 
 test "match: JIT and interpreter agree" {
-    // Compile once; the .jit field tells us which path matchInternal will use.
     var pat = try Pattern.compile("(\\d+)-(\\d+)", .{});
     defer pat.deinit();
-    const m = match("abc 10-20 xyz", &pat, 0);
+    const m = try match("abc 10-20 xyz", &pat, 0);
     try std.testing.expect(m != null);
     try std.testing.expectEqualStrings(m.?.full(), "10-20");
     try std.testing.expectEqualStrings(m.?.group(1), "10");
     try std.testing.expectEqualStrings(m.?.group(2), "20");
 }
 
-/// First occurrence of `pat` in `subject` (convenience wrapper around `match`).
-pub fn search(subject: []const Char, pat: *const Pattern) ?Match {
+test "match limit stops excessive backtracking" {
+    const pat_src: []const Char = switch (Char) {
+        u8 => "(a+)*zz",
+        u16 => &[_]Char{ '(', 'a', '+', ')', '*', 'z', 'z' },
+        u32 => &[_]Char{ '(', 'a', '+', ')', '*', 'z', 'z' },
+        else => @compileError("Char"),
+    };
+    const sub_ascii = "aaaaaaaaaaaaaz";
+    const subject = try std.testing.allocator.alloc(Char, sub_ascii.len);
+    defer std.testing.allocator.free(subject);
+    for (sub_ascii, 0..) |c, i| subject[i] = @as(Char, c);
+
+    var pat = try Pattern.compile(pat_src, .{ .limits = .{ .match_limit = 3000 } });
+    defer pat.deinit();
+    const r = match(subject, &pat, 0);
+    try std.testing.expectError(error.MatchLimitExceeded, r);
+}
+
+pub fn search(subject: []const Char, pat: *const Pattern) MatchError!?Match {
     return match(subject, pat, 0);
 }
 
-/// Returns `true` if `pat` matches anywhere in `subject`.
-pub fn isMatch(subject: []const Char, pat: *const Pattern) bool {
-    return match(subject, pat, 0) != null;
+pub fn isMatch(subject: []const Char, pat: *const Pattern) MatchError!bool {
+    return (try match(subject, pat, 0)) != null;
 }
 
 test isMatch {
     var pat = try Pattern.compile("\\d+", .{});
     defer pat.deinit();
-    try std.testing.expect(isMatch("a1b", &pat));
-    try std.testing.expect(!isMatch("abc", &pat));
+    try std.testing.expect(try isMatch("a1b", &pat));
+    try std.testing.expect(!try isMatch("abc", &pat));
 }
 
-// ----------------------------------------------------------------------------
-// Find all non-overlapping matches (requires allocator)
-
-pub fn findAll(allocator: std.mem.Allocator, subject: []const Char, pat: *const Pattern) ![]Match {
+pub fn findAll(allocator: std.mem.Allocator, subject: []const Char, pat: *const Pattern) (MatchError || error{OutOfMemory})![]Match {
     var list = std.ArrayList(Match).empty;
     errdefer list.deinit(allocator);
     var start: usize = 0;
     while (start <= subject.len) {
-        const m = match(subject, pat, start) orelse break;
+        const m = try match(subject, pat, start) orelse break;
         try list.append(allocator, m);
         const full_slice = m.full();
         if (full_slice.len == 0) break;
@@ -377,31 +417,22 @@ test findAll {
     try std.testing.expectEqualStrings(matches[1].full(), "22");
 }
 
-// ----------------------------------------------------------------------------
-// Replace (substitute): requires allocator for the output buffer
-
-/// Replace matches of `pat` in `subject` with `replacement`.
-///
-/// When `global` is `true` all non-overlapping matches are replaced;
-/// otherwise only the first match is replaced.
-///
-/// Returns an owned `[]Char` slice the caller must free.
+/// Errors: [`MatchError`] from limit checks / substitute failure, or `error.OutOfMemory`.
 pub fn replace(
     allocator: std.mem.Allocator,
     subject: []const Char,
     pat: *const Pattern,
     replacement: []const Char,
     global: bool,
-) ![]Char {
+) (MatchError || error{OutOfMemory})![]Char {
     var options: u32 = 0;
     if (global) options |= PCRE2_SUBSTITUTE_GLOBAL;
 
-    // Start with a modest output buffer; PCRE2 will report the required size
-    // if the buffer is too small (PCRE2_ERROR_NOMEMORY).
     var out_len: pcre2c.PCRE2_SIZE = 256;
     var buf = try allocator.alloc(Char, out_len);
     errdefer allocator.free(buf);
 
+    const mctx = pat.match_context;
     const rc = pcre2_substitute_fn(
         pat.code,
         subject.ptr,
@@ -409,7 +440,7 @@ pub fn replace(
         0,
         options,
         null,
-        null,
+        mctx,
         replacement.ptr,
         replacement.len,
         buf.ptr,
@@ -417,7 +448,6 @@ pub fn replace(
     );
 
     if (rc == PCRE2_ERROR_NOMEMORY) {
-        // PCRE2 updated out_len to the required number of code units; resize.
         buf = try allocator.realloc(buf, out_len);
         const rc2 = pcre2_substitute_fn(
             pat.code,
@@ -426,16 +456,22 @@ pub fn replace(
             0,
             options,
             null,
-            null,
+            mctx,
             replacement.ptr,
             replacement.len,
             buf.ptr,
             &out_len,
         );
+        if (rc2 == PCRE2_ERROR_MATCHLIMIT) return error.MatchLimitExceeded;
+        if (rc2 == PCRE2_ERROR_DEPTHLIMIT) return error.DepthLimitExceeded;
+        if (rc2 == PCRE2_ERROR_HEAPLIMIT) return error.HeapLimitExceeded;
         if (rc2 < 0) return error.SubstituteFailed;
         return allocator.realloc(buf, out_len);
     }
 
+    if (rc == PCRE2_ERROR_MATCHLIMIT) return error.MatchLimitExceeded;
+    if (rc == PCRE2_ERROR_DEPTHLIMIT) return error.DepthLimitExceeded;
+    if (rc == PCRE2_ERROR_HEAPLIMIT) return error.HeapLimitExceeded;
     if (rc < 0) return error.SubstituteFailed;
     return allocator.realloc(buf, out_len);
 }
@@ -455,9 +491,6 @@ test "replace: single replacement" {
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualStrings(out, "aYbxc");
 }
-
-// ----------------------------------------------------------------------------
-// Code-unit-width self-test
 
 test "Char type matches configured code unit width" {
     switch (pcre2_options.code_unit_width) {

@@ -1,3 +1,18 @@
+//! Static RE2 C++ library built from the same `.cc` set as upstream CMake.
+//!
+//! **Upstream:** [google/re2 `CMakeLists.txt`](https://github.com/google/re2/blob/main/CMakeLists.txt)
+//! variable `RE2_SOURCES` for release **2025-11-05** (see `build.zig.zon`). The
+//! `sources` tuple below is kept **in lockstep** with that list.
+//!
+//! **Abseil:** RE2’s CMake `target_link_libraries(re2 PUBLIC …)` pulls many
+//! `absl::*` targets; this project satisfies them with one monolithic static
+//! library from `abseil.build.zig` (`abseil_lib`).
+//!
+//! **Flags:** `-pthread` on non-Windows POSIX (aligned with RE2’s
+//! `find_package(Threads)` + `Threads::Threads` on UNIX). Windows matches
+//! upstream `WIN32` compile definitions via the dependency’s own sources.
+//!
+//! Zig: `std.Build` / `addCSourceFiles` / `linkLibrary` (see Zig docs via Context7 `/ziglang/zig`).
 const std = @import("std");
 
 const sources = .{
@@ -30,7 +45,6 @@ pub fn build(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     abseil_lib: *std.Build.Step.Compile,
-    // abseil_include: *std.Build.LazyPath,
 ) *std.Build.Step.Compile {
     const dep = b.dependency("re2", .{
         .target = target,

@@ -1,8 +1,21 @@
 //! Google RE2 bindings: convenient, Python `re` / C# `Regex`-style API over RE2.
 //!
-//! RE2 is built from the `modules/re2` submodule via CMake (requires CMake and Abseil).
+//! RE2 is UTF-8-based and uses a **linear-time** matching engine (no PCRE2-style 8/16/32
+//! width switch and no JIT toggle). Dangerous nested quantifiers are typically **rejected
+//! at compile time** rather than executed with catastrophic backtracking.
+//!
+//! **Build option:** `-Dre2-icu=true` is reserved for a future `RE2_USE_ICU` C++ build.
+//! Until ICU is linked in `re2.build.zig`, [`icu_unicode_properties`](icu_unicode_properties)
+//! remains configurable but the underlying library is always the default RE2 build.
+//!
 //! Zero-copy where possible; allocator only for replace and findAll.
 const std = @import("std");
+
+const re2_options = @import("re2_options");
+
+/// When `true`, the Zig build was asked for ICU-backed Unicode (`-Dre2-icu=true`).
+/// The C++ library must be rebuilt with `RE2_USE_ICU` for this to have effect (not wired yet).
+pub const icu_unicode_properties = re2_options.icu_unicode_properties;
 
 const re2c = @cImport({
     @cInclude("re2_ffi.h");

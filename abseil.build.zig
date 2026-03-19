@@ -1,6 +1,26 @@
+//! Static Abseil C++ library for linking RE2 and tests.
+//!
+//! **Upstream:** keep in sync with the `abseil` tarball in `build.zig.zon`
+//! (currently **20260107.1**). For a full dependency graph, see
+//! [abseil-cpp/CMakeLists.txt](https://github.com/abseil/abseil-cpp/blob/master/CMakeLists.txt)
+//! and per-module `absl/*/CMakeLists.txt`.
+//!
+//! This is a **monolithic** `.a` (not split `absl::strings`, `absl::base`, …).
+//! Source lists mirror the `.cc` files those CMake targets compile for the
+//! components RE2 2025-11-05 lists in `ABSL_DEPS` (`re2/CMakeLists.txt`).
+//!
+//! **Platform notes**
+//! - **POSIX (non-Windows):** `-pthread` on compile (matches CMake `Threads::Threads`).
+//! - **Windows:** `dbghelp`, `bcrypt`; `win32_waiter.cc` + `time_zone_name_win.cc`.
+//! - **Apple (Darwin):** `CoreFoundation` — `time_zone_lookup.cc` uses CF APIs for
+//!   the default time zone name (same requirement as linking `libre2` from CMake on macOS).
+//!
+//! Zig build API (Context7: `/ziglang/zig`): `std.Build` → `addLibrary`, `addCSourceFiles`,
+//! `linkSystemLibrary`, `linkFramework`, `Module.link_libcpp`.
 const std = @import("std");
 
 const base_sources = .{
+    "casts.cc",
     "log_severity.cc",
     "internal/raw_logging.cc",
     "internal/spinlock_wait.cc",
@@ -234,8 +254,12 @@ pub fn build(
         lib.root_module.linkSystemLibrary("bcrypt", .{});
     }
 
-    if (target.result.os.tag == .macos) {
-        lib.root_module.linkFramework("CoreFoundation", .{});
+    // Abseil cctz uses CoreFoundation for local TZ name on all Apple OSes, not only macOS.
+    switch (target.result.os.tag) {
+        .macos, .ios, .tvos, .watchos, .visionos => {
+            lib.root_module.linkFramework("CoreFoundation", .{});
+        },
+        else => {},
     }
 
     lib.root_module.addIncludePath(dep.path("."));
