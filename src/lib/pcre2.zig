@@ -1,11 +1,24 @@
-//! PCRE2 bindings: convenient, Python `re` / C# `Regex`-style API over PCRE2 (8-bit).
+//! PCRE2 bindings: convenient, Python `re` / C# `Regex`-style API over PCRE2.
+//! Code unit width is configurable at build time (8, 16, or 32).
 //! Zero-copy where possible; allocator only when needed (e.g. replace, findAll).
 const std = @import("std");
 
+const pcre2_options = @import("pcre2_options");
+
 const pcre2c = @cImport({
-    @cDefine("PCRE2_CODE_UNIT_WIDTH", "8");
+    @cDefine("PCRE2_CODE_UNIT_WIDTH", switch (pcre2_options.code_unit_width) {
+        .@"8" => "8",
+        .@"16" => "16",
+        .@"32" => "32",
+    });
+
     @cInclude("pcre2.h");
 });
+
+fn pcre2Type(comptime base: []const u8) type {
+    const suffix = @tagName(pcre2_options.code_unit_width);
+    return @field(pcre2c, base ++ "_" ++ suffix);
+}
 
 // ----------------------------------------------------------------------------
 // C constants we need (8-bit build)
