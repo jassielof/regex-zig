@@ -9,10 +9,16 @@
 #include <string>
 #include <vector>
 
+static RE2::Options silent_opts() {
+    RE2::Options o;
+    o.set_log_errors(false);
+    return o;
+}
+
 struct re2_regexp {
     RE2 re;
     re2_regexp(const char* pattern, size_t len)
-        : re(re2::StringPiece(pattern, len)) {}
+        : re(re2::StringPiece(pattern, len), silent_opts()) {}
 };
 
 re2_regexp* re2_new(const char* pattern, size_t pattern_len) {

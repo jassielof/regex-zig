@@ -4,15 +4,17 @@
     .fingerprint = 0x4204f8ca8d527afb,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
-        .pcre2 = .{
-            .path = "modules/pcre2",
+        .abseil = .{
+            .url = "https://github.com/abseil/abseil-cpp/releases/download/20260107.1/abseil-cpp-20260107.1.tar.gz",
+            .hash = "N-V-__8AAHvBpQC2PgAgIxqg7-WRzv6zAW3ItECY_C63R_Nn",
         },
         .re2 = .{
-            .path = "modules/re2",
+            .url = "https://github.com/google/re2/releases/download/2025-11-05/re2-2025-11-05.tar.gz",
+            .hash = "N-V-__8AADh_GQCXgElXgN0nNsUTPyvRCYHP5ZgNg3zFAl2e",
         },
-        .abseil = .{
-            .url = "https://github.com/abseil/abseil-cpp/archive/refs/tags/20260107.1.tar.gz",
-            .hash = "N-V-__8AAHvBpQC2PgAgIxqg7-WRzv6zAW3ItECY_C63R_Nn",
+        .pcre2 = .{
+            .url = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.gz",
+            .hash = "N-V-__8AACsQywAxzz2irB4p1ssU5F43ChN0ztDcy_GRz_Hz",
         },
     },
     .paths = .{
