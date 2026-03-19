@@ -83,9 +83,12 @@ const synchronization_sources = .{
     "internal/sem_waiter.cc",
     "internal/stdcpp_waiter.cc",
     "internal/waiter_base.cc",
-    "internal/win32_waiter.cc",
     "notification.cc",
     "mutex.cc",
+};
+
+const synchronization_windows_sources = .{
+    "internal/win32_waiter.cc",
 };
 
 const status_sources = .{
@@ -139,6 +142,9 @@ const time_sources = .{
     "internal/cctz/src/time_zone_lookup.cc",
     "internal/cctz/src/time_zone_posix.cc",
     "internal/cctz/src/zone_info_source.cc",
+};
+
+const time_windows_sources = .{
     "internal/cctz/src/time_zone_name_win.cc",
 };
 
@@ -265,6 +271,14 @@ pub fn build(
         .flags = flags,
     });
 
+    if (target.result.os.tag == .windows) {
+        lib.root_module.addCSourceFiles(.{
+            .root = dep.path("absl/synchronization"),
+            .files = &synchronization_windows_sources,
+            .flags = flags,
+        });
+    }
+
     lib.root_module.addCSourceFiles(.{
         .root = dep.path("absl/status"),
         .files = &status_sources,
@@ -288,6 +302,14 @@ pub fn build(
         .files = &time_sources,
         .flags = flags,
     });
+
+    if (target.result.os.tag == .windows) {
+        lib.root_module.addCSourceFiles(.{
+            .root = dep.path("absl/time"),
+            .files = &time_windows_sources,
+            .flags = flags,
+        });
+    }
 
     lib.root_module.addCSourceFiles(.{
         .root = dep.path("absl/log"),
