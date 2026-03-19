@@ -1,6 +1,9 @@
 [submodule "modules/re2"]
-	path = modules/re2
+	path = references/re2
 	url = https://github.com/google/re2
 [submodule "references/zig-abseil"]
 	path = references/zig-abseil
 	url = https://github.com/akunaakwei/zig-abseil
+[submodule "references/abseil"]
+	path = references/abseil
+	url = https://github.com/abseil/abseil-cpp
