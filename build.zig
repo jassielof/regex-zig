@@ -8,6 +8,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const lib_mod = b.createModule(.{
+        .root_source_file = b.path("src/lib/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const pcre2_options = b.addOptions();
 
     const pcre2_jit = b.option(bool, "pcre2-jit", "Toggle JIT support for PCRE2") orelse true;
@@ -63,12 +69,11 @@ pub fn build(b: *std.Build) void {
 
     const docs_lib = b.addLibrary(.{
         .name = "regex",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/lib/root.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = lib_mod,
     });
+
+    docs_lib.root_module.addImport("pcre2", pcre2_mod);
+    docs_lib.root_module.addImport("re2", re2_mod);
 
     const docs = b.addInstallDirectory(.{
         .source_dir = docs_lib.getEmittedDocs(),
@@ -90,6 +95,7 @@ pub fn build(b: *std.Build) void {
     test_suite.addImport("re2", re2_mod);
 
     const integration_tests = b.addTest(.{
+        .name = "integration tests",
         .root_module = test_suite,
     });
 

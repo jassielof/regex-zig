@@ -18,8 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          submodules: true
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -28,18 +26,31 @@ jobs:
         run: zig fmt .
 
       - name: Build
-        run: zig build --summary all -Doptimize=ReleaseSafe
-
-      - name: Tests
-        run: zig build --summary all tests -Doptimize=ReleaseSafe
+        run: zig build --summary all
 
       - name: Build docs
-        run: zig build --summary all docs
+        run: zig build  docs --summary all
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: zig-out/docs
+
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Tests
+        run: zig build tests --summary all
 
   pages:
     environment:
