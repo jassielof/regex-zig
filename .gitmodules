@@ -7,3 +7,6 @@
 [submodule "references/abseil"]
 	path = references/abseil
 	url = https://github.com/abseil/abseil-cpp
+[submodule "references/pcre2"]
+	path = references/pcre2
+	url = https://github.com/PCRE2Project/pcre2
