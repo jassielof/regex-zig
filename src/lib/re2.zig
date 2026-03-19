@@ -4,7 +4,9 @@
 //! Zero-copy where possible; allocator only for replace and findAll.
 const std = @import("std");
 
-const re2c = @cImport({ @cInclude("re2_ffi.h"); });
+const re2c = @cImport({
+    @cInclude("re2_ffi.h");
+});
 
 const RE2_UNSET = std.math.maxInt(usize);
 
@@ -29,8 +31,7 @@ pub const Pattern = struct {
 
     /// Compile a pattern. Returns error if the pattern is invalid.
     pub fn compile(pattern: []const u8) CompileError!Self {
-        const ptr = re2c.re2_new(pattern.ptr, pattern.len);
-        if (ptr == null) return CompileError.InvalidPattern;
+        const ptr = re2c.re2_new(pattern.ptr, pattern.len) orelse return CompileError.InvalidPattern;
         if (re2c.re2_ok(ptr) == 0) {
             re2c.re2_delete(ptr);
             return CompileError.InvalidPattern;

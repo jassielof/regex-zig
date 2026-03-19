@@ -10,6 +10,10 @@
         .re2 = .{
             .path = "modules/re2",
         },
+        .abseil = .{
+            .url = "https://github.com/abseil/abseil-cpp/archive/refs/tags/20260107.1.tar.gz",
+            .hash = "N-V-__8AAHvBpQC2PgAgIxqg7-WRzv6zAW3ItECY_C63R_Nn",
+        },
     },
     .paths = .{
         "build.zig",
