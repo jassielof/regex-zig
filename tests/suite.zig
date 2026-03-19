@@ -153,6 +153,75 @@ test "width: compileLiteral works with current Char type" {
 }
 
 // ----------------------------------------------------------------------------
+// PCRE2 CompileOptions tests
+
+test "caseless: matches regardless of case" {
+    var pat = try pcre2.Pattern.compile("hello", .{ .caseless = true });
+    defer pat.deinit();
+    try std.testing.expect(pcre2.isMatch("HELLO", &pat));
+    try std.testing.expect(pcre2.isMatch("Hello", &pat));
+    try std.testing.expect(pcre2.isMatch("hElLo", &pat));
+    try std.testing.expect(!pcre2.isMatch("world", &pat));
+}
+
+test "multiline: ^ and $ anchor to line boundaries" {
+    var pat = try pcre2.Pattern.compile("^bar", .{ .multiline = true });
+    defer pat.deinit();
+    // "bar" starts a new line so ^ should match there.
+    try std.testing.expect(pcre2.isMatch("foo\nbar\nbaz", &pat));
+    // Without multiline the same subject would not match.
+    var pat_no_ml = try pcre2.Pattern.compile("^bar", .{});
+    defer pat_no_ml.deinit();
+    try std.testing.expect(!pcre2.isMatch("foo\nbar\nbaz", &pat_no_ml));
+}
+
+test "dotall: dot matches newline" {
+    var pat = try pcre2.Pattern.compile("a.b", .{ .dotall = true });
+    defer pat.deinit();
+    try std.testing.expect(pcre2.isMatch("a\nb", &pat));
+    // Without dotall the dot does not cross a newline.
+    var pat_no_ds = try pcre2.Pattern.compile("a.b", .{});
+    defer pat_no_ds.deinit();
+    try std.testing.expect(!pcre2.isMatch("a\nb", &pat_no_ds));
+}
+
+// ----------------------------------------------------------------------------
+// PCRE2 match start_offset and groupCount tests
+
+test "match: start_offset skips earlier occurrences" {
+    var pat = try pcre2.Pattern.compile("\\d+", .{});
+    defer pat.deinit();
+    // First match is "123" at offset 1; skip past it by starting at offset 5.
+    const m1 = pcre2.match("a123b456", &pat, 0);
+    try std.testing.expect(m1 != null);
+    try std.testing.expectEqualStrings(m1.?.full(), "123");
+
+    const m2 = pcre2.match("a123b456", &pat, 5);
+    try std.testing.expect(m2 != null);
+    try std.testing.expectEqualStrings(m2.?.full(), "456");
+}
+
+test "match: groupCount returns number of capture groups" {
+    var pat = try pcre2.Pattern.compile("(a)(b)(c)", .{});
+    defer pat.deinit();
+    const m = pcre2.match("abc", &pat, 0);
+    try std.testing.expect(m != null);
+    try std.testing.expect(m.?.groupCount() == 3);
+    try std.testing.expectEqualStrings(m.?.group(1), "a");
+    try std.testing.expectEqualStrings(m.?.group(2), "b");
+    try std.testing.expectEqualStrings(m.?.group(3), "c");
+}
+
+test "match: optional group that did not participate is empty" {
+    var pat = try pcre2.Pattern.compile("(a)|(b)", .{});
+    defer pat.deinit();
+    const m = pcre2.match("a", &pat, 0);
+    try std.testing.expect(m != null);
+    try std.testing.expectEqualStrings(m.?.group(1), "a");
+    try std.testing.expectEqualStrings(m.?.group(2), ""); // unset group
+}
+
+// ----------------------------------------------------------------------------
 // RE2 tests
 
 test "re2: compile valid pattern" {
@@ -238,4 +307,56 @@ test "re2: unicode UTF-8" {
     const m = re2.match("café", &pat, 0);
     try std.testing.expect(m != null);
     try std.testing.expectEqualStrings(m.?.full(), "é");
+}
+
+// ----------------------------------------------------------------------------
+// RE2 inline-flag and advanced tests
+
+test "re2: caseless via (?i) inline flag" {
+    var pat = try re2.Pattern.compile("(?i)hello");
+    defer pat.deinit();
+    try std.testing.expect(re2.isMatch("HELLO", &pat));
+    try std.testing.expect(re2.isMatch("Hello", &pat));
+    try std.testing.expect(!re2.isMatch("world", &pat));
+}
+
+test "re2: dotall via (?s) inline flag" {
+    var pat = try re2.Pattern.compile("(?s)a.b");
+    defer pat.deinit();
+    try std.testing.expect(re2.isMatch("a\nb", &pat));
+    var pat_no_ds = try re2.Pattern.compile("a.b");
+    defer pat_no_ds.deinit();
+    try std.testing.expect(!re2.isMatch("a\nb", &pat_no_ds));
+}
+
+test "re2: multiline via (?m) inline flag" {
+    var pat = try re2.Pattern.compile("(?m)^bar");
+    defer pat.deinit();
+    try std.testing.expect(re2.isMatch("foo\nbar\nbaz", &pat));
+    var pat_no_ml = try re2.Pattern.compile("^bar");
+    defer pat_no_ml.deinit();
+    try std.testing.expect(!re2.isMatch("foo\nbar\nbaz", &pat_no_ml));
+}
+
+test "re2: start_offset skips earlier occurrences" {
+    var pat = try re2.Pattern.compile("\\d+");
+    defer pat.deinit();
+    const m1 = re2.match("a123b456", &pat, 0);
+    try std.testing.expect(m1 != null);
+    try std.testing.expectEqualStrings(m1.?.full(), "123");
+
+    const m2 = re2.match("a123b456", &pat, 5);
+    try std.testing.expect(m2 != null);
+    try std.testing.expectEqualStrings(m2.?.full(), "456");
+}
+
+test "re2: groupCount and named groups" {
+    var pat = try re2.Pattern.compile("(a)(b)(c)");
+    defer pat.deinit();
+    const m = re2.match("abc", &pat, 0);
+    try std.testing.expect(m != null);
+    try std.testing.expect(m.?.groupCount() == 3);
+    try std.testing.expectEqualStrings(m.?.group(1), "a");
+    try std.testing.expectEqualStrings(m.?.group(2), "b");
+    try std.testing.expectEqualStrings(m.?.group(3), "c");
 }

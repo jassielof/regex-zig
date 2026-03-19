@@ -234,6 +234,10 @@ pub fn build(
         lib.root_module.linkSystemLibrary("bcrypt", .{});
     }
 
+    if (target.result.os.tag == .macos) {
+        lib.root_module.linkFramework("CoreFoundation", .{});
+    }
+
     lib.root_module.addIncludePath(dep.path("."));
     lib.root_module.addCSourceFiles(.{
         .root = dep.path("absl/base"),
