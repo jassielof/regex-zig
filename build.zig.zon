@@ -18,6 +18,8 @@
         },
     },
     .paths = .{
+        "abseil.build.zig",
+        "re2.build.zig",
         "build.zig",
         "build.zig.zon",
         "src",
