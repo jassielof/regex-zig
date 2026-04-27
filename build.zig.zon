@@ -12,9 +12,10 @@
             .url = "https://github.com/google/re2/releases/download/2025-11-05/re2-2025-11-05.tar.gz",
             .hash = "N-V-__8AADh_GQCXgElXgN0nNsUTPyvRCYHP5ZgNg3zFAl2e",
         },
+        // PCRE 10.47 but with a Zig build script patch for Zig 0.16.
         .pcre2 = .{
-            .url = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.gz",
-            .hash = "N-V-__8AACsQywAxzz2irB4p1ssU5F43ChN0ztDcy_GRz_Hz",
+            .url = "https://github.com/PCRE2Project/pcre2/archive/c4cb38baa47b64fe9ed337211dbc819b3dbc01fa.zip",
+            .hash = "N-V-__8AAMEv4wBQG6eJc6uV_OIhkW-X-WwXUX4wPLyyLBxP",
         },
     },
     .paths = .{

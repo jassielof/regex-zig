@@ -22,6 +22,13 @@ zig build tests -Dpcre2-width=32
 
 **RE2:** optional `-Dre2-icu=true` sets a Zig flag for future `RE2_USE_ICU`; the C++ library is unchanged until ICU is linked in `re2.build.zig`.
 
+## Credits
+
+- <https://github.com/PCRE2Project/pcre2>
+- <https://github.com/abseil/abseil-cpp>
+- <https://github.com/google/re2>
+- <https://github.com/akunaakwei/zig-abseil>
+
 ## License
 
 Check the license file.
